@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="nl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>PDF naar Markdown &mdash; lokaal</title>
+    <!--
+      connect-src 'self' is the load-bearing line: the browser itself refuses
+      any request to another host, so "niets verlaat je computer" is enforced
+      rather than promised. GitHub Pages cannot set response headers, hence the
+      meta form. 'wasm-unsafe-eval' is what Pyodide needs to instantiate its
+      WebAssembly; it does not permit JavaScript eval.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self';
+               script-src 'self' 'wasm-unsafe-eval';
+               worker-src 'self' blob:;
+               connect-src 'self';
+               img-src 'self' blob: data:;
+               style-src 'self';
+               base-uri 'none';
+               form-action 'none'"
+    />
+    <link rel="icon" href="favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>PDF naar Markdown</h1>
+        <p class="sub">Voor beleidsdocumenten &mdash; omzetten voor gebruik in AI-modellen</p>
+      </div>
+      <div class="badges">
+        <span class="badge badge-ok" id="privacy-badge" title="Alle verwerking gebeurt in deze browsertab.">
+          Niets verlaat je computer
+        </span>
+        <span class="badge" id="engine-badge">engine laden&hellip;</span>
+      </div>
+    </header>
+
+    <main>
+      <!-- Boot -->
+      <section id="boot" class="card">
+        <h2>Engine wordt geladen</h2>
+        <p class="muted">
+          De eerste keer downloadt deze pagina ongeveer 32 MB aan PDF-engine. Daarna staat het in
+          de cache van je browser en werkt de pagina ook zonder internet.
+        </p>
+        <div class="progress"><div class="bar" id="boot-bar"></div></div>
+        <p class="mono small" id="boot-stage">starten&hellip;</p>
+      </section>
+
+      <!-- Drop zone -->
+      <section id="pick" class="card hidden">
+        <div id="dropzone" class="dropzone" tabindex="0" role="button"
+             aria-label="Kies PDF-bestanden of sleep ze hierheen">
+          <p class="dz-title">Sleep PDF&rsquo;s hierheen</p>
+          <p class="muted">of klik om te kiezen &mdash; meerdere bestanden mag</p>
+          <input type="file" id="file-input" accept="application/pdf,.pdf" multiple hidden />
+        </div>
+
+        <details id="options" class="options">
+          <summary>Instellingen</summary>
+          <div class="opt-grid">
+            <label>
+              Koppen bepalen
+              <select id="opt-heading">
+                <option value="hybrid" selected>Bladwijzers, anders lettergrootte</option>
+                <option value="toc">Alleen bladwijzers</option>
+                <option value="fontsize">Alleen lettergrootte</option>
+              </select>
+              <span class="hint">Bladwijzers geven de echte hi&euml;rarchie; lettergrootte is een gok.</span>
+            </label>
+
+            <label>
+              Vet en cursief
+              <select id="opt-emphasis">
+                <option value="auto" selected>Automatisch</option>
+                <option value="keep">Altijd behouden</option>
+                <option value="strip">Altijd weghalen</option>
+              </select>
+              <span class="hint">
+                Bij sommige huisstijlfonts wordt <em>alle</em> tekst als vet gezien; dan is vet
+                geen informatie en gaat het eruit.
+              </span>
+            </label>
+
+            <label>
+              Marge boven (pt)
+              <input type="number" id="opt-margin-top" min="0" max="300" step="1" value="0" />
+              <span class="hint">Snijdt terugkerende kopregels weg.</span>
+            </label>
+
+            <label>
+              Marge onder (pt)
+              <input type="number" id="opt-margin-bottom" min="0" max="300" step="1" value="0" />
+              <span class="hint">Snijdt paginanummers en voetregels weg. Wordt automatisch voorgesteld.</span>
+            </label>
+
+            <label class="check">
+              <input type="checkbox" id="opt-legends" checked />
+              Labels uit kaarten en figuren meenemen
+              <span class="hint">Plaatsnamen en legenda&rsquo;s onder de afbeelding zetten.</span>
+            </label>
+
+            <label>
+              Afbeeldingen en kaarten
+              <select id="opt-figures">
+                <option value="compact" selected>Compact &mdash; jpg, 110 dpi</option>
+                <option value="sharp">Scherp &mdash; png, 150 dpi</option>
+                <option value="none">Niet opnemen &mdash; alleen tekst</option>
+              </select>
+              <span class="hint">
+                Compact is ongeveer tien keer kleiner en ruim genoeg voor een AI-model. Kies
+                scherp als kaarten leesbaar moeten blijven; dat kan honderden MB&rsquo;s worden.
+              </span>
+            </label>
+
+            <label class="check">
+              <input type="checkbox" id="opt-separators" checked />
+              Paginascheidingen als commentaar
+              <span class="hint"><code>&lt;!-- page 12 --&gt;</code> &mdash; handig om een citaat terug te vinden.</span>
+            </label>
+          </div>
+        </details>
+      </section>
+
+      <!-- Queue -->
+      <section id="queue-card" class="card hidden">
+        <h2>Documenten</h2>
+        <ul id="queue" class="queue"></ul>
+        <div class="row">
+          <button id="add-more" class="secondary" type="button">Meer toevoegen</button>
+          <button id="cancel" class="secondary hidden" type="button">Stoppen</button>
+        </div>
+      </section>
+
+      <!-- Review -->
+      <section id="review-card" class="card hidden">
+        <div class="review-head">
+          <h2 id="review-title">Nakijken</h2>
+          <div class="review-nav">
+            <button id="prev-warn" class="secondary" type="button" title="Vorige pagina met waarschuwing">
+              &#9664; let op
+            </button>
+            <button id="prev" type="button" aria-label="Vorige pagina">&#9664;</button>
+            <label class="pagejump">
+              pagina
+              <input type="number" id="page-no" min="1" value="1" />
+              <span id="page-total">/ 0</span>
+            </label>
+            <button id="next" type="button" aria-label="Volgende pagina">&#9654;</button>
+            <button id="next-warn" class="secondary" type="button" title="Volgende pagina met waarschuwing">
+              let op &#9654;
+            </button>
+          </div>
+        </div>
+
+        <div id="page-warnings" class="warnings hidden"></div>
+
+        <div class="split">
+          <div class="pane pane-image">
+            <img id="page-image" alt="Weergave van de PDF-pagina" />
+          </div>
+          <div class="pane pane-text">
+            <textarea id="page-md" spellcheck="false"
+                      aria-label="Markdown van deze pagina, aanpasbaar"></textarea>
+            <div class="pane-foot">
+              <label class="check inline">
+                <input type="checkbox" id="page-ok" />
+                nagekeken
+              </label>
+              <span class="small muted" id="page-stats"></span>
+              <button id="revert" class="secondary small-btn" type="button">
+                Herstel origineel
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="row export-row">
+          <button id="download-zip" type="button">Download .zip</button>
+          <button id="download-md" class="secondary" type="button">Alleen .md</button>
+          <span class="small muted" id="export-note"></span>
+        </div>
+      </section>
+
+      <div id="error" class="card error hidden"></div>
+    </main>
+
+    <footer>
+      <p class="small muted">
+        Verwerking met <a href="https://pymupdf.io/">PyMuPDF</a> en
+        <a href="https://github.com/pymupdf/pymupdf4llm">pymupdf4llm</a> in
+        <a href="https://pyodide.org/">Pyodide</a>, volledig in deze browsertab.
+        Broncode en licenties staan in de repository.
+        <a href="README.md">Uitleg en controle</a>.
+      </p>
+    </footer>
+
+    <script type="module" src="js/main.js"></script>
+  </body>
+</html>
