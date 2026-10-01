@@ -1,11 +1,13 @@
-# PDF naar Markdown — lokaal in de browser
+# PDF, Word en PowerPoint naar Markdown — lokaal in de browser
 
-Beleidsdocumenten (omgevingsvisies, woonvisies, ambitiedocumenten) omzetten naar
-Markdown, zodat ze als invoer voor AI-modellen gebruikt kunnen worden. **Alle
-verwerking gebeurt in je eigen browser. Er gaat geen document naar een server.**
+Beleidsdocumenten (omgevingsvisies, woonvisies, ambitiedocumenten, notities,
+presentaties) omzetten naar Markdown, zodat ze als invoer voor AI-modellen
+gebruikt kunnen worden. **Alle verwerking gebeurt in je eigen browser. Er gaat
+geen document naar een server.**
 
-Zet je PDF's in het venster, kijk de pagina's na naast de originele opmaak, en
-download een ZIP met `document.md` en een map `figures/`.
+Zet je `.pdf`, `.docx` of `.pptx` in het venster, kijk het resultaat na, en
+download een ZIP met `document.md` en een map `figures/`. Een batch mag de drie
+formaten door elkaar bevatten.
 
 ## Waarom dit niet gewoon "tekst kopiëren" is
 
@@ -51,6 +53,58 @@ Wat de tool **niet** doet: OCR. PyMuPDF's eigen OCR heeft een Tesseract-binary
 nodig die niet in de WebAssembly-build zit. Pagina's zonder tekstlaag worden
 daarom gemeld, niet stilzwijgend leeg gelaten.
 
+## Word en PowerPoint
+
+Een `.docx` of `.pptx` is een zip met XML die al zegt wat alles is: een kop is
+een alinea met een kopstijl, een lijst heeft een nummering, een tabel is een
+tabel. Er valt dus geen opmaak terug te rekenen zoals bij PDF. Deze bestanden
+worden gelezen met eigen code op de Python-standaardbibliotheek
+(`python/docx_convert.py`, `python/pptx_convert.py`): geen extra download,
+geen extra afhankelijkheid.
+
+PyMuPDF kan beide formaten ook openen, maar verliest daarbij te veel: bij Word
+de lijsttekens, tabellen, vet en afbeeldingen; bij PowerPoint de grenzen tussen
+dia's, de tabellen, grafieken en notities. Daarom wordt het hier niet gebruikt.
+
+**Word** — koppen, geneste lijsten (ook via Word's lijststijlen), tabellen met
+samengevoegde cellen, vet en cursief, links, afbeeldingen met alt-tekst en
+voetnoten. Bijgehouden wijzigingen: invoegingen tellen mee, verwijderingen niet.
+Een automatische inhoudsopgave wordt overgeslagen (alleen paginanummers en
+puntjes), kop- en voetteksten worden niet gelezen. Omdat Word geen vaste
+pagina's heeft, wordt het document voor het nakijken opgedeeld in hoofdstukken
+bij de hoogste kop die het gebruikt.
+
+**PowerPoint** — één hoofdstuk per dia (`## Dia 4: titel`), in de volgorde van
+de presentatie. Wat er voor PowerPoint bij komt:
+
+- *Leesvolgorde.* Tekstvakken staan in het bestand in tekenvolgorde, niet in
+  leesvolgorde. Ze worden gesorteerd op positie: van boven naar onder, en
+  binnen een rij van links naar rechts.
+- *Opsommingstekens via sjabloon.* Of een alinea een opsommingsteken heeft,
+  bepaalt meestal de indeling of het hoofdsjabloon. Het Rotterdamse sjabloon
+  gebruikt alineaniveaus als tekststijl (intro, quote, bijschrift) en alleen een
+  paar niveaus als echte opsomming; zonder die overerving te volgen wordt een
+  dia een lijst van negen niveaus diep.
+- *Grafieken als tabel.* De getallen in een grafiek staan in het bestand, en
+  komen eruit als Markdown-tabel in plaats van als plaatje dat een model niet
+  kan lezen. Het zijn de waarden die PowerPoint het laatst toonde; is de
+  gekoppelde Excel daarna gewijzigd zonder de grafiek bij te werken, dan wijken
+  ze af.
+- *Sprekersnotities* als citaatblok. Vaak staat het eigenlijke verhaal daar,
+  soms ook wat niet voor iedere lezer bedoeld is. Ze staan standaard aan en
+  zijn uit te zetten; de front matter vermeldt `speaker_notes: true|false`.
+- Voettekst, datum en dianummer worden overgeslagen; verborgen dia's worden
+  meegenomen en gemarkeerd.
+
+Niet ondersteund: de oude formaten `.doc` en `.ppt`, en bestanden met een
+wachtwoord (beide worden herkend en gemeld). SmartArt levert alleen de tekst,
+ingesloten objecten (Excel, Visio) alleen een waarschuwing.
+
+Bij het nakijken staat er geen weergave van het origineel naast: PyMuPDF tekent
+deze formaten niet getrouw, en een verkeerd plaatje is voor een nakijker erger
+dan geen. Let bij dia's vooral op de volgorde van tekstvakken en op de getallen
+in grafieken.
+
 ## Gebruiken
 
 Open de gepubliceerde pagina, of lokaal:
@@ -84,15 +138,19 @@ Geen buildstap, geen npm in het eindproduct. De bestanden die er staan zijn de
 bestanden die de browser krijgt.
 
 ```
-index.html          pagina, CSP, opties
+index.html               pagina, CSP, opties
 app.css
-js/main.js          bestanden binnenhalen, wachtrij, export
-js/worker.js        Pyodide starten, per pagina resultaat terugsturen
-js/review.js        pagina naast Markdown, aanpasbaar
-js/export.js        ZIP (via de ingebouwde CompressionStream van de browser)
-python/convert.py   alle omzetlogica — zonder browser-afhankelijkheden
-python/bridge.py    de laag die convert.py aan JavaScript koppelt
-python/cli.py       dezelfde logica op de desktop, via uv
+js/main.js               bestanden binnenhalen, wachtrij, export
+js/worker.js             Pyodide starten, per pagina resultaat terugsturen
+js/review.js             pagina naast Markdown, aanpasbaar
+js/units.js              pagina / hoofdstuk / dia in de interface
+js/export.js             ZIP (via de ingebouwde CompressionStream van de browser)
+python/convert.py        PDF-omzetting — zonder browser-afhankelijkheden
+python/docx_convert.py   Word-omzetting, standaardbibliotheek
+python/pptx_convert.py   PowerPoint-omzetting, standaardbibliotheek
+python/office.py         geeft Word en PowerPoint dezelfde interface als PDF
+python/bridge.py         de laag die de omzetting aan JavaScript koppelt
+python/cli.py            dezelfde logica op de desktop, via uv
 vendor/             Pyodide, PyMuPDF, pymupdf4llm, tabulate
 tests/              testharnassen (zie onder)
 ```
@@ -124,6 +182,11 @@ uv run python/cli.py test-pdfs/omgevingsvisie.pdf --pages 40-70 --stdout
 # testdocument met de lastige gevallen (kolommen, kaart, tabel, scan-pagina)
 uv run tests/make-sample.py
 
+# Word- en PowerPoint-testdocumenten maken en de uitvoer controleren
+# (voetnoten, wijzigingen bijhouden, lijststijlen, kolommen, grafiek, notities)
+uv run tests/office-check.py
+uv run python/cli.py test-pdfs/sample.pptx --stdout
+
 # wheels + API onder Pyodide, zonder browser
 node tests/node-spike.mjs test-pdfs/sample.pdf
 
@@ -131,7 +194,12 @@ node tests/node-spike.mjs test-pdfs/sample.pdf
 python -m http.server 8765 &
 npm install --no-save playwright
 node tests/browser-test.mjs test-pdfs/sample.pdf
+node tests/browser-test.mjs test-pdfs/sample.docx
+node tests/browser-test.mjs test-pdfs/sample.pptx
 ```
+
+`browser-test.mjs` gebruikt standaard Edge; met `PW_CHROMIUM=<pad naar
+chromium>` draait het op een andere Chromium.
 
 `browser-test.mjs` controleert de dingen die alleen een echte browser kan
 aantonen: dat de CSP Pyodide niet blokkeert, dat de worker start, dat een echt

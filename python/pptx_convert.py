@@ -1,4 +1,4 @@
-"""PowerPoint (.pptx) to Markdown -- spike, not yet wired into the UI.
+"""PowerPoint (.pptx) to Markdown.
 
 Same approach as docx_convert.py: a .pptx is a zip of XML that names what
 everything is, so the slide title, bullets, tables and chart data are read
@@ -16,9 +16,11 @@ What a slide deck needs that a Word document does not:
   reading order, so they are sorted by position on the slide.
 - Charts. The values a chart shows are cached in the chart XML, so they come
   out as a Markdown table rather than as a picture a model cannot read.
-- Speaker notes. Often the actual argument of a deck lives there.
+- Speaker notes. Often the actual argument of a deck lives there -- and
+  sometimes things not meant for every reader, hence the switch.
 
-    python python/pptx_convert.py some.pptx -o out/
+Each slide is one reviewable unit; office.py adapts this to the interface the
+UI and the CLI use for PDF pages.
 """
 
 from __future__ import annotations
@@ -96,17 +98,7 @@ class SlideResult:
     markdown: str
     title: str = ""
     warnings: list[str] = field(default_factory=list)
-
-
-@dataclass
-class PptxResult:
-    slides: list[SlideResult]
-    front_matter: str
-    figures: dict[str, bytes] = field(default_factory=dict)
-
-    @property
-    def markdown(self) -> str:
-        return "\n\n".join(s.markdown for s in self.slides) + "\n"
+    figures: list[str] = field(default_factory=list)
 
 
 class PptxConverter:
@@ -617,63 +609,11 @@ class PptxConverter:
 
         if not body:
             warnings.append("dia zonder tekst")
-        return SlideResult(number, "\n\n".join(blocks), title, sorted(set(warnings)))
-
-    def front_matter(self) -> str:
-        core = self._xml("docProps/core.xml")
-
-        def get(path: str) -> str:
-            el = core.find(path, NS) if core is not None else None
-            return (el.text or "").strip() if el is not None else ""
-
-        def esc(value: str) -> str:
-            return '"' + value.replace('"', '\\"') + '"'
-
-        title = get("dc:title") or self.slug.replace("-", " ")
-        lines = [
-            "---",
-            f"title: {esc(title)}",
-            f"source_file: {esc(self.filename)}",
-            f"slides: {len(self.slide_parts)}",
-        ]
-        for key, path in (
-            ("author", "dc:creator"),
-            ("created", "dcterms:created"),
-            ("modified", "dcterms:modified"),
-        ):
-            if get(path):
-                lines.append(f"{key}: {esc(get(path))}")
-        lines += ['extracted_with: "pptx_convert (stdlib)"', "---"]
-        return "\n".join(lines)
-
-    def convert(self) -> PptxResult:
-        slides = [self.slide(n) for n in range(1, len(self.slide_parts) + 1)]
-        return PptxResult(slides, self.front_matter(), self.figures)
-
-
-if __name__ == "__main__":
-    import argparse
-    import sys
-    from pathlib import Path
-
-    ap = argparse.ArgumentParser(description="Convert a .pptx to Markdown.")
-    ap.add_argument("pptx", type=Path)
-    ap.add_argument("-o", "--out", type=Path, default=None)
-    ap.add_argument("--no-notes", action="store_true", help="skip speaker notes")
-    args = ap.parse_args()
-
-    conv = PptxConverter(
-        args.pptx.read_bytes(), args.pptx.name, notes=not args.no_notes
-    )
-    result = conv.convert()
-    text = result.front_matter + "\n\n" + result.markdown
-    if args.out is None:
-        sys.stdout.write(text)
-    else:
-        (args.out / "figures").mkdir(parents=True, exist_ok=True)
-        (args.out / f"{conv.slug}.md").write_text(text, encoding="utf-8", newline="\n")
-        for path, data in result.figures.items():
-            (args.out / path).write_bytes(data)
-    for s in result.slides:
-        for w in s.warnings:
-            print(f"dia {s.number}: {w}", file=sys.stderr)
+        markdown = "\n\n".join(blocks)
+        return SlideResult(
+            number,
+            markdown,
+            title,
+            sorted(set(warnings)),
+            re.findall(r"\]\((figures/[^)]+)\)", markdown),
+        )

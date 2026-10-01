@@ -334,6 +334,13 @@ input[type="number"] {
     grid-template-columns: 1fr;
   }
 }
+/* Word and PowerPoint: no faithful rendering of the original to show. */
+.split.no-preview {
+  grid-template-columns: 1fr;
+}
+.split.no-preview .pane-image {
+  display: none;
+}
 .pane {
   border: 1px solid var(--line);
   border-radius: 8px;

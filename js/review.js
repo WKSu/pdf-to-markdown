@@ -1,10 +1,14 @@
 // Side-by-side review: the rendered PDF page next to its Markdown, editable.
+// Word and PowerPoint get the Markdown alone, a section or slide at a time:
+// there is no faithful rendering of those to put beside it (see office.py).
 //
 // This is the part that makes the output trustworthy. Extraction from designed
 // documents goes wrong in ways only a human looking at the page can see -- a
 // sidebar spliced into a sentence, a heading that was really a pull quote --
 // so the tool's job is to make those easy to spot and fix, not to claim it got
 // everything right.
+
+import { unitOf } from "./units.js";
 
 const el = (id) => document.getElementById(id);
 
@@ -55,6 +59,15 @@ export class Review {
     el("review-card").classList.remove("hidden");
     el("review-title").textContent = `Nakijken — ${doc.filename}`;
     el("page-total").textContent = `/ ${doc.pageCount}`;
+    const unit = unitOf(doc);
+    el("page-unit").textContent = unit.one;
+    el("prev").setAttribute("aria-label", `Vorige ${unit.one}`);
+    el("next").setAttribute("aria-label", `Volgende ${unit.one}`);
+    el("prev-warn").title = `Vorige ${unit.one} met waarschuwing`;
+    el("next-warn").title = `Volgende ${unit.one} met waarschuwing`;
+    const preview = (doc.kind ?? "pdf") === "pdf";
+    el("review-split").classList.toggle("no-preview", !preview);
+    el("preview-note").classList.toggle("hidden", preview);
     el("page-no").max = String(doc.pageCount);
     this.render();
   }
@@ -117,7 +130,7 @@ export class Review {
       image.alt = `PDF-pagina ${this.index + 1}`;
     } else {
       image.removeAttribute("src");
-      image.alt = page ? "Geen weergave beschikbaar" : "Pagina wordt nog omgezet";
+      image.alt = page ? "Geen weergave beschikbaar" : `${unitOf(doc).one} wordt nog omgezet`;
     }
 
     const textarea = el("page-md");

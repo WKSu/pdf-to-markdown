@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>PDF naar Markdown &mdash; lokaal</title>
+    <title>PDF, Word en PowerPoint naar Markdown &mdash; lokaal</title>
     <!--
       connect-src 'self' is the load-bearing line: the browser itself refuses
       any request to another host, so "niets verlaat je computer" is enforced
@@ -28,7 +28,7 @@
   <body>
     <header class="topbar">
       <div>
-        <h1>PDF naar Markdown</h1>
+        <h1>PDF, Word en PowerPoint naar Markdown</h1>
         <p class="sub">Voor beleidsdocumenten &mdash; omzetten voor gebruik in AI-modellen</p>
       </div>
       <div class="badges">
@@ -44,7 +44,7 @@
       <section id="boot" class="card">
         <h2>Engine wordt geladen</h2>
         <p class="muted">
-          De eerste keer downloadt deze pagina ongeveer 32 MB aan PDF-engine. Daarna staat het in
+          De eerste keer downloadt deze pagina ongeveer 32 MB aan engine. Daarna staat het in
           de cache van je browser en werkt de pagina ook zonder internet.
         </p>
         <div class="progress"><div class="bar" id="boot-bar"></div></div>
@@ -54,10 +54,13 @@
       <!-- Drop zone -->
       <section id="pick" class="card hidden">
         <div id="dropzone" class="dropzone" tabindex="0" role="button"
-             aria-label="Kies PDF-bestanden of sleep ze hierheen">
-          <p class="dz-title">Sleep PDF&rsquo;s hierheen</p>
-          <p class="muted">of klik om te kiezen &mdash; meerdere bestanden mag</p>
-          <input type="file" id="file-input" accept="application/pdf,.pdf" multiple hidden />
+             aria-label="Kies PDF-, Word- of PowerPoint-bestanden of sleep ze hierheen">
+          <p class="dz-title">Sleep PDF-, Word- of PowerPoint-bestanden hierheen</p>
+          <p class="muted">
+            of klik om te kiezen &mdash; meerdere bestanden mag &middot; .pdf, .docx en .pptx
+          </p>
+          <input type="file" id="file-input" multiple hidden
+                 accept="application/pdf,.pdf,.docx,.pptx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation" />
         </div>
 
         <details id="options" class="options">
@@ -70,7 +73,10 @@
                 <option value="toc">Alleen bladwijzers</option>
                 <option value="fontsize">Alleen lettergrootte</option>
               </select>
-              <span class="hint">Bladwijzers geven de echte hi&euml;rarchie; lettergrootte is een gok.</span>
+              <span class="hint">
+                Alleen PDF. Bladwijzers geven de echte hi&euml;rarchie; lettergrootte is een gok.
+                Word en PowerPoint geven hun koppen zelf aan.
+              </span>
             </label>
 
             <label>
@@ -81,27 +87,29 @@
                 <option value="strip">Altijd weghalen</option>
               </select>
               <span class="hint">
-                Bij sommige huisstijlfonts wordt <em>alle</em> tekst als vet gezien; dan is vet
-                geen informatie en gaat het eruit.
+                Alleen PDF. Bij sommige huisstijlfonts wordt <em>alle</em> tekst als vet gezien;
+                dan is vet geen informatie en gaat het eruit.
               </span>
             </label>
 
             <label>
               Marge boven (pt)
               <input type="number" id="opt-margin-top" min="0" max="300" step="1" value="0" />
-              <span class="hint">Snijdt terugkerende kopregels weg.</span>
+              <span class="hint">Alleen PDF. Snijdt terugkerende kopregels weg.</span>
             </label>
 
             <label>
               Marge onder (pt)
               <input type="number" id="opt-margin-bottom" min="0" max="300" step="1" value="0" />
-              <span class="hint">Snijdt paginanummers en voetregels weg. Wordt automatisch voorgesteld.</span>
+              <span class="hint">
+                Alleen PDF. Snijdt paginanummers en voetregels weg. Wordt automatisch voorgesteld.
+              </span>
             </label>
 
             <label class="check">
               <input type="checkbox" id="opt-legends" checked />
               Labels uit kaarten en figuren meenemen
-              <span class="hint">Plaatsnamen en legenda&rsquo;s onder de afbeelding zetten.</span>
+              <span class="hint">Alleen PDF. Plaatsnamen en legenda&rsquo;s onder de afbeelding zetten.</span>
             </label>
 
             <label>
@@ -120,7 +128,19 @@
             <label class="check">
               <input type="checkbox" id="opt-separators" checked />
               Paginascheidingen als commentaar
-              <span class="hint"><code>&lt;!-- page 12 --&gt;</code> &mdash; handig om een citaat terug te vinden.</span>
+              <span class="hint">
+                <code>&lt;!-- page 12 --&gt;</code>, bij PowerPoint <code>&lt;!-- slide 4 --&gt;</code>
+                &mdash; handig om een citaat terug te vinden.
+              </span>
+            </label>
+
+            <label class="check">
+              <input type="checkbox" id="opt-notes" checked />
+              Sprekersnotities uit PowerPoint meenemen
+              <span class="hint">
+                Vaak staat het eigenlijke verhaal in de notities. Soms ook wat niet voor iedere
+                lezer bedoeld is: kijk ze na voordat je de Markdown deelt.
+              </span>
             </label>
           </div>
         </details>
@@ -141,17 +161,17 @@
         <div class="review-head">
           <h2 id="review-title">Nakijken</h2>
           <div class="review-nav">
-            <button id="prev-warn" class="secondary" type="button" title="Vorige pagina met waarschuwing">
+            <button id="prev-warn" class="secondary" type="button" title="Vorige met waarschuwing">
               &#9664; let op
             </button>
             <button id="prev" type="button" aria-label="Vorige pagina">&#9664;</button>
             <label class="pagejump">
-              pagina
+              <span id="page-unit">pagina</span>
               <input type="number" id="page-no" min="1" value="1" />
               <span id="page-total">/ 0</span>
             </label>
             <button id="next" type="button" aria-label="Volgende pagina">&#9654;</button>
-            <button id="next-warn" class="secondary" type="button" title="Volgende pagina met waarschuwing">
+            <button id="next-warn" class="secondary" type="button" title="Volgende met waarschuwing">
               let op &#9654;
             </button>
           </div>
@@ -159,7 +179,13 @@
 
         <div id="page-warnings" class="warnings hidden"></div>
 
-        <div class="split">
+        <p id="preview-note" class="small muted hidden">
+          Word en PowerPoint hebben geen paginaweergave om naast de Markdown te zetten: koppen,
+          lijsten en tabellen komen rechtstreeks uit het bestand. Let bij dia&rsquo;s vooral op de
+          volgorde van tekstvakken en op de getallen in grafieken.
+        </p>
+
+        <div class="split" id="review-split">
           <div class="pane pane-image">
             <img id="page-image" alt="Weergave van de PDF-pagina" />
           </div>
@@ -191,8 +217,9 @@
 
     <footer>
       <p class="small muted">
-        Verwerking met <a href="https://pymupdf.io/">PyMuPDF</a> en
-        <a href="https://github.com/pymupdf/pymupdf4llm">pymupdf4llm</a> in
+        PDF met <a href="https://pymupdf.io/">PyMuPDF</a> en
+        <a href="https://github.com/pymupdf/pymupdf4llm">pymupdf4llm</a>, Word en PowerPoint
+        met eigen code op de Python-standaardbibliotheek, in
         <a href="https://pyodide.org/">Pyodide</a>, volledig in deze browsertab.
         Broncode en licenties staan in de repository.
         <a href="README.md">Uitleg en controle</a>.

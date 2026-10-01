@@ -13,8 +13,12 @@ without a browser in the loop, and browser output can be diffed against a
 known-good reference. Pins match the wheels in vendor/ -- if they drift, the
 CLI stops being a valid reference for what the site produces.
 
+Takes PDF, Word (.docx) and PowerPoint (.pptx). For Word, --pages counts
+sections (split at the top-level headings); for PowerPoint, slides.
+
     uv run python/cli.py test-pdfs/omgevingsvisie.pdf -o out/
     uv run python/cli.py test-pdfs/omgevingsvisie.pdf --pages 12-14 --stdout
+    uv run python/cli.py test-pdfs/sample.pptx --no-notes --stdout
 """
 
 from __future__ import annotations
@@ -28,6 +32,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 import pymupdf
 from convert import Converter, Options, assemble, suggest_margins
+from office import UNITS, OfficeConverter, detect_format
 
 
 def parse_pages(spec: str | None, total: int) -> list[int]:
@@ -46,8 +51,10 @@ def parse_pages(spec: str | None, total: int) -> list[int]:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Convert a PDF to Markdown.")
-    ap.add_argument("pdf", type=Path)
+    ap = argparse.ArgumentParser(
+        description="Convert a PDF, Word or PowerPoint document to Markdown."
+    )
+    ap.add_argument("document", type=Path)
     ap.add_argument("-o", "--out", type=Path, default=Path("out"))
     ap.add_argument("--pages", help='e.g. "12-14" or "1,5,9"')
     ap.add_argument("--dpi", type=int, default=110, help="figure resolution")
@@ -69,14 +76,20 @@ def main() -> None:
     ap.add_argument("--no-legends", action="store_true", help="skip figure label lists")
     ap.add_argument("--no-images", action="store_true")
     ap.add_argument(
+        "--no-notes", action="store_true", help="PowerPoint: skip speaker notes"
+    )
+    ap.add_argument(
         "--stdout", action="store_true", help="print Markdown instead of writing"
     )
     args = ap.parse_args()
 
-    pdf_bytes = args.pdf.read_bytes()
+    data = args.document.read_bytes()
+    kind = detect_format(data, args.document.name)
 
-    if args.margin_top is None or args.margin_bottom is None:
-        doc = pymupdf.open(stream=pdf_bytes, filetype="pdf")
+    if kind != "pdf":
+        top = bottom = 0.0  # nothing to crop: headers and footers are not read
+    elif args.margin_top is None or args.margin_bottom is None:
+        doc = pymupdf.open(stream=data, filetype="pdf")
         try:
             auto_top, auto_bottom = suggest_margins(doc)
         finally:
@@ -96,12 +109,17 @@ def main() -> None:
         figure_legends=not args.no_legends,
         ignore_images=args.no_images,
         previews=False,  # the CLI has nothing to preview into
+        speaker_notes=not args.no_notes,
     )
 
-    conv = Converter(pdf_bytes, args.pdf.name, opts)
+    if kind == "pdf":
+        conv: Converter | OfficeConverter = Converter(data, args.document.name, opts)
+    else:
+        conv = OfficeConverter(data, args.document.name, opts, kind=kind)
+    unit = UNITS[kind]
     pages = parse_pages(args.pages, conv.page_count)
     print(
-        f"{args.pdf.name}: {conv.page_count} pages, converting {len(pages)}, "
+        f"{args.document.name}: {conv.page_count} {unit}s, converting {len(pages)}, "
         f"toc={len(conv.toc)} entries",
         file=sys.stderr,
     )
@@ -113,11 +131,11 @@ def main() -> None:
         if i % 10 == 0 or i == len(pages):
             elapsed = time.perf_counter() - started
             print(
-                f"  {i}/{len(pages)} pages  {elapsed:.1f}s  {elapsed / i:.2f}s/page",
+                f"  {i}/{len(pages)} {unit}s  {elapsed:.1f}s  {elapsed / i:.2f}s/{unit}",
                 file=sys.stderr,
             )
 
-    markdown = assemble(conv.front_matter(), results, opts.page_separators)
+    markdown = assemble(conv.front_matter(), results, opts.page_separators, unit)
 
     if args.stdout:
         sys.stdout.write(markdown)
@@ -139,9 +157,9 @@ def main() -> None:
 
     warned = [r for r in results if r.warnings]
     if warned:
-        print(f"\n{len(warned)} page(s) with warnings:", file=sys.stderr)
+        print(f"\n{len(warned)} {unit}(s) with warnings:", file=sys.stderr)
         for r in warned[:20]:
-            print(f"  p{r.number}: {'; '.join(r.warnings)}", file=sys.stderr)
+            print(f"  {unit} {r.number}: {'; '.join(r.warnings)}", file=sys.stderr)
 
     conv.close()
 

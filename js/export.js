@@ -128,7 +128,11 @@ export function referencedFigures(doc) {
   for (const page of doc.pages) {
     if (!page) continue;
     const markdown = page.edited ?? page.markdown ?? "";
-    for (const match of markdown.matchAll(/!\[\]\(([^)]+)\)/g)) referenced.add(match[1]);
+    // Any alt text: Word and PowerPoint images carry theirs, and an escaped
+    // "\]" inside it must not end the match early.
+    for (const match of markdown.matchAll(/!\[(?:\\.|[^\]\\])*\]\(([^)]+)\)/g)) {
+      referenced.add(match[1]);
+    }
   }
   return [...doc.figures.entries()]
     .filter(([path]) => referenced.has(path))

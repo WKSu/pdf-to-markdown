@@ -1,6 +1,7 @@
 // Wiring: file intake, worker orchestration, queue state, export.
 import { Review } from "./review.js";
 import { download, makeZip, referencedFigures } from "./export.js";
+import { ACCEPTED, LEGACY_OFFICE, unitOf } from "./units.js";
 
 const el = (id) => document.getElementById(id);
 
@@ -40,11 +41,17 @@ worker.onmessage = ({ data }) => {
       // strip off every page.
       doc.suggested = { top: data.margin_top ?? 0, bottom: data.margin_bottom ?? 0 };
       doc.pageCount = data.pages;
-      if (!el("options").dataset.touched) {
+      doc.kind = data.kind;
+      doc.unit = data.unit;
+      // Margins only exist for PDFs; a Word file in the batch should not reset
+      // the fields to zero under a PDF that is still waiting.
+      if (data.kind === "pdf" && !el("options").dataset.touched) {
         el("opt-margin-top").value = String(doc.suggested.top);
         el("opt-margin-bottom").value = String(doc.suggested.bottom);
       }
-      setState(doc, `${data.pages} pagina's, ${data.toc_entries} bladwijzers — in wachtrij`);
+      const units = `${data.pages} ${data.pages === 1 ? unitOf(doc).one : unitOf(doc).many}`;
+      const outline = data.kind === "pdf" ? `, ${data.toc_entries} bladwijzers` : "";
+      setState(doc, `${units}${outline} — in wachtrij`);
       // Queued only now: starting before the probe lands would convert with
       // margins of zero and leave running headers in the Markdown.
       queue.push(doc.id);
@@ -56,6 +63,8 @@ worker.onmessage = ({ data }) => {
       const doc = docs.get(data.id);
       if (!doc) break;
       Object.assign(doc, {
+        kind: data.kind,
+        unit: data.unit,
         pageCount: data.pages,
         slug: data.slug,
         frontMatter: data.front_matter,
@@ -78,7 +87,7 @@ worker.onmessage = ({ data }) => {
       if (page.warnings?.length) doc.warned++;
       setState(
         doc,
-        `${page.number}/${doc.pageCount} pagina's` +
+        `${page.number}/${doc.pageCount} ${unitOf(doc).many}` +
           (doc.warned ? ` — ${doc.warned} met waarschuwing` : ""),
         (page.number / doc.pageCount) * 100,
       );
@@ -93,7 +102,7 @@ worker.onmessage = ({ data }) => {
         doc.li.classList.remove("q-active");
         doc.finished = true;
         const note = [];
-        if (doc.warned) note.push(`${doc.warned} pagina's met waarschuwing`);
+        if (doc.warned) note.push(`${doc.warned} ${unitOf(doc).many} met waarschuwing`);
         if (doc.emphasisStripped) note.push("vet weggehaald (huisstijlfont)");
         setState(
           doc,
@@ -164,6 +173,7 @@ function readOptions(doc) {
     margin_bottom: touched ? Number(el("opt-margin-bottom").value) || 0 : suggested.bottom,
     figure_legends: el("opt-legends").checked,
     page_separators: el("opt-separators").checked,
+    speaker_notes: el("opt-notes").checked,
     previews: true,
     ...(FIGURE_PRESETS[el("opt-figures").value] ?? FIGURE_PRESETS.compact),
   };
@@ -177,14 +187,22 @@ for (const id of ["opt-margin-top", "opt-margin-bottom"]) {
 }
 
 async function addFiles(fileList) {
-  const files = [...fileList].filter(
-    (f) => f.type === "application/pdf" || /\.pdf$/i.test(f.name),
-  );
+  const all = [...fileList];
+  const files = all.filter((f) => f.type === "application/pdf" || ACCEPTED.test(f.name));
+  const legacy = all.filter((f) => LEGACY_OFFICE.test(f.name));
+  if (legacy.length) {
+    // The old binary formats are a different file format altogether, not an
+    // older version of the same XML; saying so beats a silent skip.
+    showError(
+      `${legacy.map((f) => f.name).join(", ")}: oud Word/PowerPoint-formaat. ` +
+        "Open het bestand en sla het op als .docx of .pptx.",
+    );
+  }
   if (!files.length) {
-    showError("Geen PDF-bestanden gevonden in die selectie.");
+    if (!legacy.length) showError("Geen PDF-, Word- of PowerPoint-bestanden in die selectie.");
     return;
   }
-  hideError();
+  if (!legacy.length) hideError();
   el("queue-card").classList.remove("hidden");
 
   for (const file of files) {
@@ -209,7 +227,7 @@ async function addFiles(fileList) {
     docs.set(id, doc);
     // A copy, because the probe transfers nothing and we still need the bytes.
     // Queueing happens when the probe replies -- see the "probed" handler.
-    worker.postMessage({ type: "probe", id, bytes: bytes.slice() });
+    worker.postMessage({ type: "probe", id, bytes: bytes.slice(), filename: file.name });
   }
 }
 
@@ -222,7 +240,7 @@ function pump() {
   doc.opts = { ...readOptions(doc), filename: doc.filename };
   setState(doc, "omzetten…", 0);
   el("cancel").classList.remove("hidden");
-  // Transfer the PDF bytes: the worker owns them from here.
+  // Transfer the bytes: the worker owns them from here.
   worker.postMessage({ type: "convert", id, bytes: doc.bytes, opts: doc.opts }, [
     doc.bytes.buffer,
   ]);
@@ -331,7 +349,9 @@ function refreshExportNote() {
   let figureBytes = 0;
   for (const bytes of doc.figures.values()) figureBytes += bytes.length;
   if (figureBytes) bits.push(`${doc.figures.size} figuren, ${formatSize(figureBytes)}`);
-  if (done < doc.pageCount) bits.push("nog niet klaar — download bevat alleen omgezette pagina's");
+  if (done < doc.pageCount) {
+    bits.push(`nog niet klaar — download bevat alleen omgezette ${unitOf(doc).many}`);
+  }
   el("export-note").textContent = bits.join(" · ");
 }
 
@@ -353,6 +373,7 @@ function joinDocument(doc) {
       frontMatter: doc.frontMatter,
       pages,
       separators: doc.opts?.page_separators ?? true,
+      unit: doc.unit ?? "page",
     });
   });
 }

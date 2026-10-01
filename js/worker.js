@@ -8,7 +8,13 @@ const WHEELS = [
   "../vendor/wheels/tabulate-0.10.0-py3-none-any.whl",
   "../vendor/wheels/pymupdf4llm-0.3.4-py3-none-any.whl",
 ];
-const PY_SOURCES = ["../python/convert.py", "../python/bridge.py"];
+const PY_SOURCES = [
+  "../python/convert.py",
+  "../python/docx_convert.py",
+  "../python/pptx_convert.py",
+  "../python/office.py",
+  "../python/bridge.py",
+];
 
 let py = null;
 let bridge = null;
@@ -96,6 +102,17 @@ async function convert({ id, bytes, opts }) {
   }
 }
 
+// A PythonError carries the whole traceback. The person in front of the queue
+// needs its last line -- the messages raised on purpose in office.py are
+// written for them -- and the full trace still goes to the console.
+function readable(error) {
+  const text = String(error?.message ?? error);
+  if (!text.includes("Traceback")) return text;
+  console.debug(text);
+  const last = text.trim().split("\n").pop();
+  return last.replace(/^\w+(Error|Exception): /, "");
+}
+
 self.onmessage = async (event) => {
   const message = event.data;
   try {
@@ -104,7 +121,11 @@ self.onmessage = async (event) => {
         await init();
         break;
       case "probe":
-        say({ type: "probed", id: message.id, ...toJs(bridge.probe(message.bytes)) });
+        say({
+          type: "probed",
+          id: message.id,
+          ...toJs(bridge.probe(message.bytes, message.filename ?? "")),
+        });
         break;
       case "convert":
         await convert(message);
@@ -120,6 +141,7 @@ self.onmessage = async (event) => {
             message.frontMatter,
             py.toPy(message.pages),
             message.separators,
+            message.unit ?? "page",
           ),
         });
         break;
@@ -127,6 +149,6 @@ self.onmessage = async (event) => {
         say({ type: "error", message: `unknown message: ${message.type}` });
     }
   } catch (error) {
-    say({ type: "error", id: message.id, message: String(error?.message ?? error) });
+    say({ type: "error", id: message.id, message: readable(error) });
   }
 };
