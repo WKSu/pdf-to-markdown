@@ -21,6 +21,7 @@ from typing import Any
 
 import pymupdf
 import pymupdf4llm
+from anonymize import DEFAULT_CATEGORIES
 from pymupdf4llm.helpers.pymupdf_rag import IdentifyHeaders, TocHeaders
 
 # A figure smaller than this fraction of the page is decoration (rules, logos,
@@ -89,6 +90,10 @@ class Options:
     heading_mode: str = "hybrid"  # hybrid | toc | fontsize
     emphasis: str = "auto"  # auto | keep | strip
     previews: bool = True
+    # PowerPoint only (see office.py); here so one Options travels everywhere.
+    speaker_notes: bool = True
+    # Categories to mask, see anonymize.py. A tuple so Options stays hashable.
+    anonymize: tuple[str, ...] = DEFAULT_CATEGORIES
 
 
 @dataclass
@@ -103,6 +108,7 @@ class PageResult:
     heading_repairs: int = 0
     dropped_tables: int = 0
     text_recovered: bool = False
+    masked: dict[str, int] = field(default_factory=dict)  # see anonymize.py
 
 
 class HybridHeaders:
@@ -662,13 +668,20 @@ class Converter:
 
 
 def assemble(
-    front_matter: str, pages: list[PageResult], separators: bool = True
+    front_matter: str,
+    pages: list[PageResult],
+    separators: bool = True,
+    unit: str = "page",
 ) -> str:
-    """Join per-page Markdown into the final document."""
+    """Join per-page Markdown into the final document.
+
+    `unit` names what a page is -- "slide" for a deck, "section" for a Word
+    document -- so a separator never claims a page number that does not exist.
+    """
     parts = [front_matter]
     for page in pages:
         if separators:
-            parts.append(f"<!-- page {page.number} -->")
+            parts.append(f"<!-- {unit} {page.number} -->")
         if page.markdown:
             parts.append(page.markdown)
     return "\n\n".join(parts).rstrip() + "\n"

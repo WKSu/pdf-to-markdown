@@ -10,6 +10,7 @@ tijdens gebruik niets van een CDN of andere server gehaald.
 | [tabulate](https://github.com/astanin/python-tabulate) | 0.10.0 | MIT | `vendor/wheels/tabulate-0.10.0-py3-none-any.whl` |
 | [Pyodide](https://pyodide.org/) | 314.0.3 | MPL-2.0 | `vendor/pyodide/` |
 | CPython (in Pyodide) | 3.14 | PSF-2.0 | `vendor/pyodide/python_stdlib.zip` |
+| [Maskeringsscript](https://github.com/minbzk/maskeringsscript) (gemeente Rotterdam) | 1.1.11 | EUPL-1.2 | patronen in `python/anonymize.py`, straatnamen in `python/data/straatnamen-rotterdam.txt` |
 
 Geen npm-afhankelijkheden in het eindproduct. De ZIP-export gebruikt de
 ingebouwde `CompressionStream` van de browser in plaats van een
@@ -33,6 +34,24 @@ Twee praktische gevolgen:
   hangen aan `pymupdf-layout`, dat onder Polyform Noncommercial valt én
   `onnxruntime` vereist — waarvoor geen WebAssembly-build bestaat. Die versies
   zijn hier dus zowel juridisch als technisch onbruikbaar.
+
+## Maskeringsscript (EUPL-1.2)
+
+`python/anonymize.py` is gebaseerd op de Maskeringsscript van de gemeente
+Rotterdam (copyright gemeente Rotterdam, versie 1.1.11): de patronen voor
+e-mail, IBAN, BSN met 11-proef, creditcard met Luhn-controle, kentekens,
+postcodes en de ondertekening na een groet, en de lijst met Rotterdamse
+straatnamen (`ListClassifier Basic.xlsx`, blad *Address*). Die zijn
+aangepast voor beleidsstukken; welke wel en welke niet zijn overgenomen, en
+waarom, staat bovenaan het bestand.
+
+De EUPL-1.2 staat in artikel 5 toe dat een afgeleid werk onder een
+compatibele licentie wordt verspreid, en noemt de AGPL-3.0 in de bijlage als
+compatibel. Deze delen vallen daarom, net als de rest van de repository, onder
+de AGPL-3.0, met deze vermelding van herkomst.
+
+Niet overgenomen: het GLiNER-model (vereist PyTorch, dat niet in de browser
+draait) en de lijsten met voornamen, achternamen en nationaliteiten.
 
 ## Herkomst controleren
 

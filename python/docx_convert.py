@@ -1,4 +1,4 @@
-"""Word (.docx) to Markdown -- spike, not yet wired into the UI.
+"""Word (.docx) to Markdown.
 
 A .docx is a zip of XML that already says what everything is: a heading is a
 paragraph with a heading style, a list item carries a numbering reference, a
@@ -12,7 +12,9 @@ nothing to the 32 MB download, and has no version pins to keep in sync.
 PyMuPDF 1.27 can open .docx too, but tested on a simple document it drops
 list markers, table structure, bold/italic and images, so it is not used here.
 
-    python python/docx_convert.py some.docx -o out/
+A Word document has no fixed pages, so for page-by-page review it is split
+into sections at its top-level headings (see sections()). office.py adapts
+that to the interface the UI and the CLI use for PDF pages.
 """
 
 from __future__ import annotations
@@ -57,13 +59,24 @@ LIST_STYLE_DEPTH = re.compile(
 
 MD_SPECIAL = re.compile(r"([\\`*_\[\]])")
 
+# Plain text that happens to start like Markdown block syntax ("2024. Een
+# jaar", "- en verder", "#hashtag ...") would otherwise turn into a list or a
+# heading.
+BLOCK_START = re.compile(r"^(#|[-+>]\s|\d+[.)]\s)")
+
+HEADING_MD = re.compile(r"^(#{1,6}) (.*)$")
+FOOTNOTE_REF = re.compile(r"(?<!\\)\[\^(\d+)\](?!:)")
+FIGURE_REF = re.compile(r"\]\((figures/[^)]+)\)")
+
 
 @dataclass
-class DocxResult:
+class Section:
+    """One reviewable unit: everything up to the next top-level heading."""
+
     markdown: str
-    front_matter: str
-    figures: dict[str, bytes] = field(default_factory=dict)
+    title: str = ""
     warnings: list[str] = field(default_factory=list)
+    figures: list[str] = field(default_factory=list)
 
 
 def _on(el: ET.Element | None) -> bool:
@@ -348,6 +361,11 @@ class DocxConverter:
                     if k[0] == num_id and k[1] > ilvl:
                         del self._list_counters[k]
                 return f"{indent}{self._list_counters[key]}. {text}"
+        if BLOCK_START.match(text):
+            # "2024. Een jaar" needs the dot escaped, not the digits.
+            text = re.sub(r"^(\d+)([.)])", r"\1\\\2", text)
+            if not text[0].isdigit():
+                text = "\\" + text
         return text
 
     def _table(self, tbl: ET.Element) -> str:
@@ -378,13 +396,15 @@ class DocxConverter:
         lines += ["| " + " | ".join(r) + " |" for r in rows[1:]]
         return "\n".join(lines)
 
-    def _blocks(self, body: ET.Element) -> list[str]:
-        blocks: list[str] = []
+    def _blocks(self, body: ET.Element) -> list[tuple[str, list[str]]]:
+        """(markdown, warnings raised while converting it) per block."""
+        blocks: list[tuple[str, list[str]]] = []
         for el in body:
+            before = len(self.warnings)
             if el.tag == q("w:p"):
-                blocks.append(self._paragraph(el))
+                blocks.append((self._paragraph(el), self.warnings[before:]))
             elif el.tag == q("w:tbl"):
-                blocks.append(self._table(el))
+                blocks.append((self._table(el), self.warnings[before:]))
             elif el.tag == q("w:sdt"):
                 # A generated table of contents is page numbers and dot leaders,
                 # and the headings it lists are in the document anyway.
@@ -430,72 +450,54 @@ class DocxConverter:
 
     # --- document ------------------------------------------------------------
 
-    def front_matter(self) -> str:
-        core = self._xml("docProps/core.xml")
+    def _footnote(self, number: int) -> str:
+        fn = self.footnotes.get(self.used_footnotes[number - 1])
+        text = (
+            " ".join(self._paragraph(p) for p in fn.iter(q("w:p")))
+            if fn is not None
+            else ""
+        )
+        return f"[^{number}]: {text.strip()}"
 
-        def get(path: str) -> str:
-            el = core.find(path, NS) if core is not None else None
-            return (el.text or "").strip() if el is not None else ""
+    def sections(self) -> list[Section]:
+        """The document split at its top-level headings.
 
-        def esc(value: str) -> str:
-            return '"' + value.replace('"', '\\"') + '"'
-
-        title = get("dc:title") or self.slug.replace("-", " ")
-        lines = ["---", f"title: {esc(title)}", f"source_file: {esc(self.filename)}"]
-        for key, path in (
-            ("author", "dc:creator"),
-            ("created", "dcterms:created"),
-            ("modified", "dcterms:modified"),
-        ):
-            if get(path):
-                lines.append(f"{key}: {esc(get(path))}")
-        lines += ['extracted_with: "docx_convert (stdlib)"', "---"]
-        return "\n".join(lines)
-
-    def convert(self) -> DocxResult:
+        Top-level means the shallowest heading level the document actually
+        uses, so a document that starts at Kop 2 still splits into chapters.
+        Text before the first heading is a section of its own. Footnote
+        definitions go with the section that first refers to them, so a
+        reviewer sees a note next to the text it belongs to.
+        """
         root = self._xml("word/document.xml")
         if root is None:
             raise ValueError("geen word/document.xml: dit is geen .docx")
-        body = root.find("w:body", NS)
-        markdown = self._join(self._blocks(body))
-        if self.used_footnotes:
-            notes = []
-            for i, fid in enumerate(self.used_footnotes, 1):
-                fn = self.footnotes.get(fid)
-                text = (
-                    " ".join(self._paragraph(p) for p in fn.iter(q("w:p")))
-                    if fn is not None
-                    else ""
+        blocks = [(md, w) for md, w in self._blocks(root.find("w:body", NS)) if md]
+        levels = [len(m.group(1)) for md, _ in blocks if (m := HEADING_MD.match(md))]
+        top = min(levels, default=None)
+
+        groups: list[list[tuple[str, list[str]]]] = [[]]
+        for md, warnings in blocks:
+            m = HEADING_MD.match(md)
+            if m and len(m.group(1)) == top and groups[-1]:
+                groups.append([])
+            groups[-1].append((md, warnings))
+
+        sections = []
+        defined: set[int] = set()
+        for group in groups:
+            markdown = self._join([md for md, _ in group])
+            refs = [int(n) for n in FOOTNOTE_REF.findall(markdown)]
+            new = [n for n in dict.fromkeys(refs) if n not in defined]
+            defined.update(new)
+            if new:
+                markdown += "\n\n" + "\n".join(self._footnote(n) for n in new)
+            first = HEADING_MD.match(group[0][0]) if group else None
+            sections.append(
+                Section(
+                    markdown=markdown,
+                    title=first.group(2) if first else "",
+                    warnings=sorted({w for _, ws in group for w in ws}),
+                    figures=FIGURE_REF.findall(markdown),
                 )
-                notes.append(f"[^{i}]: {text.strip()}")
-            markdown += "\n\n" + "\n".join(notes)
-        return DocxResult(
-            markdown=markdown + "\n",
-            front_matter=self.front_matter(),
-            figures=self.figures,
-            warnings=sorted(set(self.warnings)),
-        )
-
-
-if __name__ == "__main__":
-    import argparse
-    import sys
-    from pathlib import Path
-
-    ap = argparse.ArgumentParser(description="Convert a .docx to Markdown.")
-    ap.add_argument("docx", type=Path)
-    ap.add_argument("-o", "--out", type=Path, default=None)
-    args = ap.parse_args()
-
-    conv = DocxConverter(args.docx.read_bytes(), args.docx.name)
-    result = conv.convert()
-    text = result.front_matter + "\n\n" + result.markdown
-    if args.out is None:
-        sys.stdout.write(text)
-    else:
-        (args.out / "figures").mkdir(parents=True, exist_ok=True)
-        (args.out / f"{conv.slug}.md").write_text(text, encoding="utf-8", newline="\n")
-        for path, data in result.figures.items():
-            (args.out / path).write_bytes(data)
-    for w in result.warnings:
-        print(f"waarschuwing: {w}", file=sys.stderr)
+            )
+        return sections
