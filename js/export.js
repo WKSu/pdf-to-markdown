@@ -138,3 +138,25 @@ export function referencedFigures(doc) {
     .filter(([path]) => referenced.has(path))
     .map(([path, bytes]) => ({ name: path, content: bytes }));
 }
+
+/** `name`, or `name-2`, `name-3`... when a batch has two documents of that name. */
+export function uniqueName(name, used) {
+  let candidate = name;
+  for (let n = 2; used.has(candidate); n++) candidate = `${name}-${n}`;
+  used.add(candidate);
+  return candidate;
+}
+
+/**
+ * CSV the way Dutch Excel opens it without an import wizard: semicolons, CRLF,
+ * and a byte-order mark so "Bijlage é" is not read as Latin-1.
+ */
+export function csvTable(rows) {
+  const cell = (value) => {
+    let text = String(value ?? "");
+    // A file name like "=HYPERLINK(...)" would run as a formula in Excel.
+    if (/^[=+\-@\t]/.test(text)) text = `'${text}`;
+    return /[;"\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  };
+  return "\ufeff" + rows.map((row) => row.map(cell).join(";")).join("\r\n") + "\r\n";
+}

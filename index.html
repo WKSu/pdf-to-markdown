@@ -57,10 +57,16 @@
              aria-label="Kies PDF-, Word- of PowerPoint-bestanden of sleep ze hierheen">
           <p class="dz-title">Sleep PDF-, Word- of PowerPoint-bestanden hierheen</p>
           <p class="muted">
-            of klik om te kiezen &mdash; meerdere bestanden mag &middot; .pdf, .docx en .pptx
+            of klik om te kiezen &mdash; meerdere bestanden of een hele map mag &middot; .pdf,
+            .docx en .pptx
           </p>
           <input type="file" id="file-input" multiple hidden
                  accept="application/pdf,.pdf,.docx,.pptx,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.presentationml.presentation" />
+        </div>
+        <div class="row">
+          <button id="pick-folder" class="secondary" type="button">Kies een map</button>
+          <span class="small muted">Alle PDF-, Word- en PowerPoint-bestanden erin, ook in submappen.</span>
+          <input type="file" id="folder-input" webkitdirectory multiple hidden />
         </div>
 
         <details id="options" class="options">
@@ -134,6 +140,35 @@
               </span>
             </label>
 
+            <fieldset id="opt-anon" class="anon">
+              <legend>Persoonsgegevens maskeren</legend>
+              <span class="hint">
+                Op basis van de Maskeringsscript van de gemeente Rotterdam, afgestemd op
+                beleidsstukken: bedragen, datums, jaartallen en straatnamen blijven staan. Standaard
+                aan staan alleen gegevens die vrijwel nooit beleidsinhoud zijn. Maskeren is nooit
+                volledig en afbeeldingen worden niet gemaskeerd: kijk het resultaat na.
+              </span>
+              <label class="check"><input type="checkbox" data-cat="email" checked /> E-mailadressen</label>
+              <label class="check"><input type="checkbox" data-cat="telefoon" checked /> Telefoonnummers</label>
+              <label class="check"><input type="checkbox" data-cat="iban" checked /> IBAN</label>
+              <label class="check"><input type="checkbox" data-cat="bsn" checked /> BSN (met 11-proef)</label>
+              <label class="check"><input type="checkbox" data-cat="creditcard" checked /> Creditcardnummers</label>
+              <label class="check"><input type="checkbox" data-cat="kenteken" checked /> Kentekens</label>
+              <label class="check"><input type="checkbox" data-cat="postcode" checked /> Postcodes</label>
+              <label class="check">
+                <input type="checkbox" data-cat="naam" /> Namen
+                <span class="hint">Na dhr./mevrouw, met voorletters (&ldquo;J.P. de Vries&rdquo;) of onder een groet.</span>
+              </label>
+              <label class="check">
+                <input type="checkbox" data-cat="adres" /> Adressen
+                <span class="hint">Straat met huisnummer; een straatnaam alleen blijft staan.</span>
+              </label>
+              <label class="check">
+                <input type="checkbox" data-cat="datum" /> Geboortedata en leeftijden
+                <span class="hint">Alleen na &ldquo;geboren&rdquo; of &ldquo;geboortedatum&rdquo;, en &ldquo;37 jaar oud&rdquo;.</span>
+              </label>
+            </fieldset>
+
             <label class="check">
               <input type="checkbox" id="opt-notes" checked />
               Sprekersnotities uit PowerPoint meenemen
@@ -153,6 +188,8 @@
         <div class="row">
           <button id="add-more" class="secondary" type="button">Meer toevoegen</button>
           <button id="cancel" class="secondary hidden" type="button">Stoppen</button>
+          <button id="download-all" type="button" disabled>Download alles (.zip)</button>
+          <span class="small muted" id="queue-note"></span>
         </div>
       </section>
 

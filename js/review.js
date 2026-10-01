@@ -106,6 +106,8 @@ export class Review {
     if (page.tables) bits.push(`${page.tables} tabel(len)`);
     if (page.figures?.length) bits.push(`${page.figures.length} figuur(en)`);
     if (page.heading_repairs) bits.push(`${page.heading_repairs} kop hersteld`);
+    const masked = Object.entries(page.masked ?? {}).filter(([, n]) => n);
+    if (masked.length) bits.push(`gemaskeerd: ${masked.map(([k, n]) => `${n} ${k}`).join(", ")}`);
     if (page.edited != null && page.edited !== page.markdown) bits.push("aangepast");
     el("page-stats").textContent = bits.join(" · ");
   }

@@ -9,11 +9,13 @@ from __future__ import annotations
 
 from typing import Any
 
+import anonymize
 import pymupdf
 from convert import Converter, Options, assemble, suggest_margins
 from office import UNITS, OfficeConverter, detect_format
 
 _open: dict[str, Converter | OfficeConverter] = {}
+_masks: dict[str, anonymize.Anonymizer] = {}
 
 
 def _as_bytes(data: Any) -> bytes:
@@ -57,7 +59,12 @@ def probe(data: bytes, filename: str = "") -> dict[str, Any]:
         finally:
             conv.close()
 
-    doc = pymupdf.open(stream=data, filetype="pdf")
+    try:
+        doc = pymupdf.open(stream=data, filetype="pdf")
+    except Exception as error:  # MuPDF raises several types for one cause
+        raise ValueError(
+            "Dit bestand is beschadigd of geen geldige PDF en kan niet worden geopend."
+        ) from error
     try:
         top, bottom = suggest_margins(doc)
         return {
@@ -86,6 +93,7 @@ def start(doc_id: str, data: bytes, opts: dict[str, Any]) -> dict[str, Any]:
     else:
         conv = OfficeConverter(data, filename, options, kind=kind)
     _open[doc_id] = conv
+    _masks[doc_id] = masker = anonymize.Anonymizer(options.anonymize)
     return {
         "kind": kind,
         "unit": UNITS[kind],
@@ -93,14 +101,14 @@ def start(doc_id: str, data: bytes, opts: dict[str, Any]) -> dict[str, Any]:
         "slug": conv.slug,
         "title": conv.title,
         "toc_entries": len(conv.toc),
-        "front_matter": conv.front_matter(),
+        "front_matter": anonymize.front_matter(conv.front_matter(), masker),
         "bold_coverage": conv.bold_coverage,
         "emphasis_stripped": conv.strip_emphasis,
     }
 
 
 def page(doc_id: str, number: int) -> dict[str, Any]:
-    result = _open[doc_id].page(number)
+    result = anonymize.apply(_open[doc_id].page(number), _masks[doc_id])
     return {
         "number": result.number,
         "markdown": result.markdown,
@@ -110,6 +118,7 @@ def page(doc_id: str, number: int) -> dict[str, Any]:
         "heading_repairs": result.heading_repairs,
         "dropped_tables": result.dropped_tables,
         "text_recovered": result.text_recovered,
+        "masked": dict(result.masked),
         "preview": result.preview,
         "figures": [{"path": f["path"], "bytes": f["bytes"]} for f in result.figures],
     }
@@ -117,6 +126,7 @@ def page(doc_id: str, number: int) -> dict[str, Any]:
 
 def finish(doc_id: str) -> None:
     conv = _open.pop(doc_id, None)
+    _masks.pop(doc_id, None)
     if conv is not None:
         conv.close()
 

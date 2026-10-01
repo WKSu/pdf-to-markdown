@@ -8,7 +8,11 @@ const WHEELS = [
   "../vendor/wheels/tabulate-0.10.0-py3-none-any.whl",
   "../vendor/wheels/pymupdf4llm-0.3.4-py3-none-any.whl",
 ];
+// Paths under python/ are kept under /pkgs, so data/ files sit where
+// anonymize.py looks for them.
 const PY_SOURCES = [
+  "../python/anonymize.py",
+  "../python/data/straatnamen-rotterdam.txt",
   "../python/convert.py",
   "../python/docx_convert.py",
   "../python/pptx_convert.py",
@@ -49,7 +53,9 @@ async function init() {
   }
   for (const url of PY_SOURCES) {
     const text = await (await fetch(new URL(url, import.meta.url))).text();
-    py.FS.writeFile(`/pkgs/${url.split("/").pop()}`, text);
+    const target = `/pkgs/${url.replace("../python/", "")}`;
+    py.FS.mkdirTree(target.slice(0, target.lastIndexOf("/")));
+    py.FS.writeFile(target, text);
   }
 
   py.runPython(`
