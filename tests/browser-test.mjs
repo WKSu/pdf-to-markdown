@@ -5,16 +5,25 @@
 // ZIP is a valid archive -- and, most importantly, that the page makes no
 // request to any other host.
 //
-//   node tests/browser-test.mjs [pdf] [--headed]
+//   node tests/browser-test.mjs [document.pdf|.docx|.pptx] [--headed]
+//
+// Uses Edge by default; set PW_CHROMIUM to a Chromium binary to use that
+// instead (e.g. PW_CHROMIUM=/opt/pw-browsers/chromium on a Linux box).
 import { chromium } from "playwright";
 import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 
 const ORIGIN = "http://127.0.0.1:8765";
-const pdf = process.argv.find((a) => a.endsWith(".pdf")) ?? "test-pdfs/sample.pdf";
+const pdf =
+  process.argv.find((a) => /\.(pdf|docx|pptx)$/i.test(a)) ?? "test-pdfs/sample.pdf";
+const isPdf = /\.pdf$/i.test(pdf);
 const headed = process.argv.includes("--headed");
 
-const browser = await chromium.launch({ channel: "msedge", headless: !headed });
+const browser = await chromium.launch(
+  process.env.PW_CHROMIUM
+    ? { executablePath: process.env.PW_CHROMIUM, headless: !headed }
+    : { channel: "msedge", headless: !headed },
+);
 const page = await browser.newPage({ acceptDownloads: true });
 
 const cspViolations = [];
@@ -78,7 +87,9 @@ const hasImage = await page.evaluate(() => {
   const img = document.getElementById("page-image");
   return Boolean(img?.src?.startsWith("blob:")) && img.naturalWidth > 0;
 });
-console.log(`page preview rendered: ${hasImage}`);
+console.log(`page preview rendered: ${hasImage}${isPdf ? "" : " (not expected for Word/PowerPoint)"}`);
+const noteShown = await page.isVisible("#preview-note");
+console.log(`no-preview note shown: ${noteShown}`);
 
 step("download unedited markdown (for CLI parity diff)");
 {
@@ -103,7 +114,7 @@ try {
   const fromBrowser = readFileSync("out/browser-parity.md", "utf8");
   const slug = /source_file: "(.+?)"/.exec(fromBrowser)?.[1] ?? "";
   const fromCli = readFileSync(
-    `out/parity-check/${slug.replace(/\.pdf$/i, "").toLowerCase()}.md`,
+    `out/parity-check/${slug.replace(/\.(pdf|docx|pptx)$/i, "").toLowerCase()}.md`,
     "utf8",
   );
   // Not byte-equality. MuPDF's font and glyph caches differ between a fresh
@@ -175,6 +186,14 @@ writeFileSync("out/browser-test.md", md);
 console.log(`markdown: ${md.length.toLocaleString()} chars`);
 console.log(`edit present in export: ${md.includes("AANGEPAST DOOR REVIEWER")}`);
 
+// Every figure the Markdown points at must be in the ZIP. Word and PowerPoint
+// images carry alt text, which an earlier version of the export did not match.
+const wanted = [...md.matchAll(/!\[(?:\\.|[^\]\\])*\]\((figures\/[^)]+)\)/g)].map((m) => m[1]);
+const zipText = zip.toString("latin1");
+const missingFigures = wanted.filter((name) => !zipText.includes(name));
+console.log(`figures referenced: ${wanted.length}, missing from zip: ${missingFigures.length}`);
+for (const name of missingFigures.slice(0, 5)) console.log(`  ! ${name}`);
+
 step("offline: convert again with the network cut");
 await page.context().setOffline(true);
 await page.setInputFiles("#file-input", pdf);
@@ -213,7 +232,8 @@ const failed =
   cspViolations.length > 0 ||
   consoleErrors.length > 0 ||
   !parityOk ||
-  !hasImage ||
+  (isPdf ? !hasImage || noteShown : hasImage || !noteShown) ||
+  missingFigures.length > 0 ||
   !md.includes("AANGEPAST DOOR REVIEWER") ||
   !/klaar/.test(offlineState);
 console.log(`\n=== ${failed ? "FAIL" : "PASS"} in ${ms()}`);

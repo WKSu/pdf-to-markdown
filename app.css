@@ -243,6 +243,29 @@ button.small-btn {
 .opt-grid label.check input {
   margin-right: 0.4rem;
 }
+/* The masking categories take a full row: ten checkboxes in one grid cell
+   would be a column a screen tall. */
+.anon {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0.35rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem 0.7rem;
+  margin: 0;
+}
+.anon legend {
+  font-size: 0.88rem;
+  font-weight: 600;
+  padding: 0 0.3rem;
+}
+.anon > .hint {
+  grid-column: 1 / -1;
+}
+.opt-grid .anon label.check {
+  font-weight: 400;
+}
 .hint {
   font-weight: 400;
   font-size: 0.79rem;
@@ -333,6 +356,13 @@ input[type="number"] {
   .split {
     grid-template-columns: 1fr;
   }
+}
+/* Word and PowerPoint: no faithful rendering of the original to show. */
+.split.no-preview {
+  grid-template-columns: 1fr;
+}
+.split.no-preview .pane-image {
+  display: none;
 }
 .pane {
   border: 1px solid var(--line);
